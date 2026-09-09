@@ -1,45 +1,54 @@
-# [Project name]
+# Python Chess Engine System
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Dependency-free Python chess engine system with legal move generation, Alpha-Beta search, NNUE-style evaluation, self-play data generation, model arena, and Windows packaging.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `python tools/initialize_models.py` — create deterministic baseline NNUE checkpoints
+- `python Engine.py` — run the UCI engine
+- `python Selfplay.py` — open the self-play GUI
+- `python Arena.py` — open the model arena GUI
+- `python -m unittest discover -s tests -v` — run engine tests
+- `python tools/benchmark.py --depth 4` — run the search benchmark
+- `.\build_windows.ps1` — build Engine.exe, Selfplay.exe, and Arena.exe on Windows
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.11+ (tested with Python 3.13)
+- Standard library runtime; optional PyInstaller only for Windows packaging
+- Bitboard-backed Board with reversible state snapshots
+- Iterative-deepening Negamax with TT, PVS, quiescence, null move, LMR
+- Sparse 768 -> 256 -> 64 -> 1 NNUE-style evaluator
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `chess_engine/board.py` — board state, attacks, legal move generation, FEN, make/undo
+- `chess_engine/search.py` — Alpha-Beta, TT, move ordering, pruning
+- `chess_engine/nnue.py` — checkpoint format, inference, incremental accumulator
+- `chess_engine/uci.py` — UCI protocol loop
+- `chess_engine/perft.py` — reference Perft suites
+- `chess_engine/selfplay.py` — CPU worker GUI and training data
+- `chess_engine/arena.py` — model comparison and promotion UI
+- `tests/test_engine.py` — regression and state-integrity tests
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The move generator uses pseudo-legal moves followed by make/check/undo; this favors correctness and keeps pinned/double-check handling explicit.
+- Board state snapshots preserve all reversible metadata and the accumulator, making undo exact and easy to debug.
+- The built-in NNUE model is deterministic and dependency-free; binary checkpoints use a versioned format.
+- Self-play workers are separate processes so CPU worker count is meaningful despite Python's GIL.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The system provides a UCI engine for GUI/Arena integration, a self-play data generator, and an Arena for testing and promoting current versus previous NNUE checkpoints.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+The user requested a staged implementation with correctness and Perft validation before optimization.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- `python tools/initialize_models.py` should be run before selecting model files in the GUI.
+- Perft uses the standard Chessprogramming reference FENs; the Kiwipete label refers to the canonical Position 2 FEN.
+- The core does not use `python-chess`; UCI coordinate moves are parsed internally.
 
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

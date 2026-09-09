@@ -1,0 +1,3 @@
+# The engine core intentionally has no third-party runtime dependency.
+# PyInstaller bundles Python and Tkinter into the three Windows executables.
+pyinstaller>=6.0

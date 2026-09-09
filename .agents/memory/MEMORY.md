@@ -1,0 +1,1 @@
+- [Python engine runtime](python-engine-runtime.md) — keep GUI imports optional so headless engine and training tests run without Tk support.
