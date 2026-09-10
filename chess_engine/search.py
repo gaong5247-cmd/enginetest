@@ -181,14 +181,15 @@ class Search:
         if entry:
             tt_move = entry.best_move
             if entry.depth >= depth:
+                entry_score = self._score_from_tt(entry.score, ply)
                 if entry.bound == EXACT:
-                    return entry.score, [entry.best_move] if entry.best_move else []
+                    return entry_score, [entry.best_move] if entry.best_move else []
                 if entry.bound == LOWER:
-                    alpha = max(alpha, entry.score)
+                    alpha = max(alpha, entry_score)
                 elif entry.bound == UPPER:
-                    beta = min(beta, entry.score)
+                    beta = min(beta, entry_score)
                 if alpha >= beta:
-                    return entry.score, [entry.best_move] if entry.best_move else []
+                    return entry_score, [entry.best_move] if entry.best_move else []
 
         in_check = board.in_check()
         # Null-move pruning is deliberately guarded against endgames and check.
@@ -236,21 +237,31 @@ class Search:
                     self.history[type_of(board.board[from_sq(move)])][to_sq(move)] += depth * depth
                 break
         bound = UPPER if best_score <= original_alpha else LOWER if best_score >= beta else EXACT
-        self.tt.store(TTEntry(board.key, depth, best_score, bound, best_move))
+        self.tt.store(TTEntry(board.key, depth, self._score_to_tt(best_score, ply), bound, best_move))
         return best_score, best_pv
 
     def _quiescence(self, board: Board, alpha: int, beta: int, ply: int) -> tuple[int, list[int]]:
         self.nodes += 1
         self.seldepth = max(self.seldepth, ply)
-        stand_pat = self.network.evaluate(board)
-        if stand_pat >= beta:
-            return beta, []
-        if stand_pat > alpha:
-            alpha = stand_pat
+        in_check = board.in_check()
+        if ply >= 64:
+            return self.network.evaluate(board), []
+        if not in_check:
+            stand_pat = self.network.evaluate(board)
+            if stand_pat >= beta:
+                return beta, []
+            if stand_pat > alpha:
+                alpha = stand_pat
+            moves = board.legal_moves(captures_only=True)
+        else:
+            # A checked position has no legal stand-pat score. Search every
+            # evasion, including quiet king moves and interpositions.
+            moves = board.legal_moves()
+            if not moves:
+                return -MATE + ply, []
         best_pv: list[int] = []
-        captures = board.legal_moves(captures_only=True)
-        captures.sort(key=lambda move: self._move_score(board, move, 0, ply), reverse=True)
-        for move in captures:
+        moves.sort(key=lambda move: self._move_score(board, move, 0, ply), reverse=True)
+        for move in moves:
             if self.should_stop():
                 break
             board.make_move(move)
@@ -262,6 +273,22 @@ class Search:
             if score > alpha:
                 alpha, best_pv = score, [move] + child_pv
         return alpha, best_pv
+
+    @staticmethod
+    def _score_to_tt(score: int, ply: int) -> int:
+        if score > MATE - 1_000:
+            return score + ply
+        if score < -MATE + 1_000:
+            return score - ply
+        return score
+
+    @staticmethod
+    def _score_from_tt(score: int, ply: int) -> int:
+        if score > MATE - 1_000:
+            return score - ply
+        if score < -MATE + 1_000:
+            return score + ply
+        return score
 
     def _move_score(self, board: Board, move: int, tt_move: int, ply: int) -> int:
         if move == tt_move:

@@ -65,6 +65,12 @@ class SearchTests(unittest.TestCase):
         self.assertIn(result.best_move, board.legal_moves())
         self.assertGreater(result.nodes, 0)
 
+    def test_search_finds_immediate_mate(self) -> None:
+        board = Board("6k1/5ppp/8/8/8/6Q1/5PPP/6K1 w - - 0 1")
+        result = Search().search(board, SearchLimits(depth=2))
+        self.assertEqual(result.best_move, board.find_move("g3b8"))
+        self.assertGreaterEqual(result.score, 99_000)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,6 +59,30 @@ GUI이며 Python이 설치되지 않은 PC에서도 실행되도록 PyInstaller�
 4. 최소 게임 수와 통과 점수를 설정해 대국
 5. 통과하면 `Promote current`로 이전 모델을 갱신
 
+## Stockfish teacher data from public master games
+
+매그너스 칼슨과 히카루 나카무라의 개인 API를 사용하는 것이 아니라,
+Chess.com이 제공하는 공개 월별 게임 아카이브 API를 사용해 기보를 수집할 수
+있습니다. Stockfish는 로컬 `stockfish` 실행 파일로 각 포지션을 평가하고,
+평가값은 White 관점의 centipawn으로 `data/master_stockfish.jsonl`에 저장됩니다.
+
+```bash
+python tools/collect_master_stockfish.py \
+  --months 3 \
+  --max-games-per-player 50 \
+  --depth 14 \
+  --every 2 \
+  --limit-positions 2000 \
+  --overwrite \
+  --train \
+  --model-output models/master-stockfish.nnue
+```
+
+`--limit-positions`는 여러 선수에게 균등하게 배분됩니다. API 인덱스에 아직
+생성되지 않은 최신 월이 포함될 수 있어 404 월은 자동으로 건너뜁니다.
+학습기는 현재의 dependency-free NNUE 체크포인트 형식을 유지하며, 더 강한
+학습을 위해서는 더 많은 포지션과 여러 epoch를 사용해야 합니다.
+
 현재 NNUE 파일은 구조가 고정된 자체 포맷을 사용합니다. 입력 768,
 hidden 256, 출력 hidden 64, scalar 1이며, Board의 accumulator는 이동 시
 변경된 feature만 더하고 빼도록 구현되어 있습니다.

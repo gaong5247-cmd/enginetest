@@ -15,7 +15,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .constants import BLACK, PIECE_VALUES, WHITE, color_of, type_of
+from .constants import (
+    BLACK,
+    BISHOP,
+    KING,
+    KNIGHT,
+    PAWN,
+    PIECE_VALUES,
+    QUEEN,
+    ROOK,
+    WHITE,
+    color_of,
+    file_of,
+    rank_of,
+    type_of,
+)
 
 INPUTS = 12 * 64
 HIDDEN = 256
@@ -126,9 +140,47 @@ class NNUE:
             for index, value in enumerate(hidden):
                 total += value * self.hidden_weights[base + index]
             result += self._crelu(total // 32 + self.output_weights[out])
-        # A transparent classical prior keeps the untrained model useful.
+        # A transparent classical prior keeps an untrained checkpoint useful.
+        # It is deliberately outside the accumulator so trained weights and
+        # make/undo verification retain the same binary format.
         material = board.material()
-        return int(result // 8 + material)
+        positional = 0
+        pawn_files = [[0] * 8 for _ in (WHITE, BLACK)]
+        for sq, piece in enumerate(board.board):
+            if not piece:
+                continue
+            color = color_of(piece)
+            piece_type = type_of(piece)
+            sign = 1 if color == WHITE else -1
+            relative_rank = rank_of(sq) if color == WHITE else 7 - rank_of(sq)
+            center_distance = abs(3.5 - file_of(sq)) + abs(3.5 - rank_of(sq))
+            center = max(0, int(7 - center_distance))
+            if piece_type == PAWN:
+                positional += sign * (relative_rank * 7 + center * 2)
+                pawn_files[color][file_of(sq)] += 1
+            elif piece_type == KNIGHT:
+                positional += sign * (center * 9 + relative_rank * 2)
+            elif piece_type == BISHOP:
+                positional += sign * (center * 4 + relative_rank * 2)
+            elif piece_type == ROOK:
+                positional += sign * (relative_rank * 3 + center * 2)
+            elif piece_type == QUEEN:
+                positional += sign * center * 2
+            elif piece_type == KING:
+                # Prefer a sheltered king early and activity in the endgame
+                # without allowing the small term to outweigh material.
+                positional += sign * (-center * 3 if relative_rank < 2 else center * 3)
+
+        for color, sign in ((WHITE, 1), (BLACK, -1)):
+            for file_count in pawn_files[color]:
+                if file_count > 1:
+                    positional -= sign * (file_count - 1) * 10
+            if sum(1 for count in pawn_files[color] if count) >= 2:
+                positional += sign * 30  # bishop-pair-like pawn-chain stability prior
+            bishops = board.bitboards[3 + 6 * color].bit_count()
+            if bishops >= 2:
+                positional += sign * 30
+        return int(result // 8 + material + positional)
 
     def evaluate(self, board: object) -> int:
         score = self.evaluate_white(board)

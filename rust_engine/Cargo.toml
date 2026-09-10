@@ -1,0 +1,26 @@
+[package]
+name = "python-nnue-alpha-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Dependency-free bitboard chess engine with Alpha-Beta and NNUE-style evaluation"
+
+[lib]
+name = "chess_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "engine"
+path = "src/bin/engine.rs"
+
+[[bin]]
+name = "selfplay"
+path = "src/bin/selfplay.rs"
+
+[[bin]]
+name = "arena"
+path = "src/bin/arena.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"

@@ -1,3 +1,5 @@
 # The engine core intentionally has no third-party runtime dependency.
 # PyInstaller bundles Python and Tkinter into the three Windows executables.
 pyinstaller>=6.0
+# Optional teacher-data pipeline: public Chess.com PGN parsing and Stockfish labels.
+python-chess>=1.999

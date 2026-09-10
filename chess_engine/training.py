@@ -86,19 +86,22 @@ def train_checkpoint(
     pipeline; richer feature-gradient training can use the same model format.
     """
     model = NNUE.load(base_model) if base_model else default_network
-    records: list[tuple[Board, int]] = []
-    with Path(dataset_path).open(encoding="utf8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            board = Board(row["fen"])
-            board.network = model
-            board.accumulator = model.initial_accumulator(board)
-            records.append((board, int(row["target_cp"])))
+    record_count = 0
     for _ in range(max(1, epochs)):
-        for board, target in records:
-            prediction = model.evaluate_white(board)
-            model.output_bias += int((target - prediction) * learning_rate)
+        # Stream the JSONL file so large teacher datasets do not require one
+        # Board plus accumulator per row in memory.
+        with Path(dataset_path).open(encoding="utf8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                board = Board(row["fen"])
+                board.network = model
+                board.accumulator = model.initial_accumulator(board)
+                target = int(row["target_cp"])
+                prediction = model.evaluate_white(board)
+                model.output_bias += int((target - prediction) * learning_rate)
+                if _ == 0:
+                    record_count += 1
     model.save(output_path, Path(output_path).stem)
-    return len(records)
+    return record_count

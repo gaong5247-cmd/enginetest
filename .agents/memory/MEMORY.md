@@ -1,1 +1,2 @@
 - [Python engine runtime](python-engine-runtime.md) — keep GUI imports optional so headless engine and training tests run without Tk support.
+- [Engine search correctness](engine-search-corrections.md) — checked quiescence must search all evasions, and large teacher datasets must stream.
