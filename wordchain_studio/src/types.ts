@@ -14,6 +14,7 @@ export type Candidate = {
   status: "finish" | "win" | "neutral" | "danger";
   score: number;
   replies: number;
+  opponentAttacks: number;
   neutrality: number;
   safety: number;
   forced: boolean;
