@@ -77,7 +77,7 @@ jobs:
       - name: Install Android SDK / NDK
         shell: bash
         run: |
-          sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;27.2.12479018"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
           echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
