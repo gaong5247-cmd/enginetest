@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: wordchain-studio-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     name: Windows EXE
