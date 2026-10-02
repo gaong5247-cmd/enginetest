@@ -8,6 +8,7 @@ let history: string[] = [];
 let stats: EngineStats | null = null;
 let result: AnalysisResult | null = null;
 let busy = false;
+let roundNo = 1;
 
 app.innerHTML = `
   <div class="shell">
@@ -21,7 +22,7 @@ app.innerHTML = `
     </header>
 
     <section class="notice" id="notice">
-      첫 실행 시 로블록스 한국 끝말잇기 사전을 내려받아 기기에 캐시합니다.
+      사전을 불러오는 중입니다. Android에서는 분석을 CPU 작업으로 분리해 화면 멈춤을 방지합니다.
     </section>
 
     <section class="controls card">
@@ -51,9 +52,23 @@ app.innerHTML = `
         <div class="section-head">
           <div>
             <span class="kicker">GAME STATE</span>
-            <h2>이어진 단어</h2>
+            <h2><span id="roundLabel">1라운드</span> 진행</h2>
           </div>
           <span class="turn-count" id="turnCount">0수</span>
+        </div>
+
+        <div class="assumption-box">
+          <strong>첫 제시어</strong>
+          <div class="input-row">
+            <input id="promptInput" maxlength="1" autocomplete="off" spellcheck="false" placeholder="예: 술" />
+            <button class="primary" id="startRound">1라운드 시작!</button>
+          </div>
+          <p>첫 수는 Hard / Safe / Attack 등 어떤 모드여도 무조건 안전한 중립 수를 먼저 고릅니다.</p>
+        </div>
+
+        <div class="assumption-box">
+          <strong>진행중 제시어</strong>
+          <p id="ongoingPrompt">아직 게임이 시작되지 않음</p>
         </div>
 
         <div class="chain" id="chain">
@@ -66,12 +81,12 @@ app.innerHTML = `
         </div>
 
         <div class="button-row">
-          <button class="primary" id="firstWord">첫단어 시작!</button>
           <button class="secondary" id="analyze">현재 상태 분석</button>
+          <button class="ghost" id="newGame">새게임</button>
         </div>
         <div class="button-row small-buttons">
           <button class="ghost" id="undo">한 수 취소</button>
-          <button class="ghost danger" id="clear">초기화</button>
+          <button class="ghost danger" id="clear">기록만 초기화</button>
         </div>
 
         <div class="assumption-box">
@@ -100,11 +115,11 @@ app.innerHTML = `
           <table>
             <thead>
               <tr>
-                <th>#</th><th>단어</th><th>판정</th><th>Eval</th><th>상대 답변</th><th>중립</th><th>안전</th>
+                <th>#</th><th>단어</th><th>판정</th><th>Eval</th><th>상대 답변</th><th>상대 공격</th><th>중립</th><th>안전</th>
               </tr>
             </thead>
             <tbody id="candidateBody">
-              <tr><td colspan="7" class="empty-row">분석 결과가 여기에 표시됨</td></tr>
+              <tr><td colspan="8" class="empty-row">분석 결과가 여기에 표시됨</td></tr>
             </tbody>
           </table>
         </div>
@@ -122,7 +137,7 @@ app.innerHTML = `
           <div><span>Nodes</span><strong>—</strong></div>
           <div><span>Edges</span><strong>—</strong></div>
         </div>
-        <p class="micro">사전은 앱에 복제해 넣지 않고 원본 공개 데이터에서 첫 실행 시 내려받아 로컬에 캐시함.</p>
+        <p class="micro">분석은 시간/노드 예산을 사용해 CPU가 한 상태에서 무한히 파고들지 않도록 제한됩니다.</p>
       </aside>
     </main>
   </div>
@@ -134,6 +149,7 @@ const modeEl = $("#mode") as HTMLSelectElement;
 const depthEl = $("#depth") as HTMLInputElement;
 const beamEl = $("#beam") as HTMLInputElement;
 const inputEl = $("#wordInput") as HTMLInputElement;
+const promptEl = $("#promptInput") as HTMLInputElement;
 
 function setBusy(value: boolean, message?: string) {
   busy = value;
@@ -160,8 +176,23 @@ function formatEval(score: number, forced: boolean) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
+function lastRequired(): string | null {
+  const last = history.at(-1);
+  if (!last) return null;
+  return Array.from(last).at(-1) ?? null;
+}
+
 function renderHistory() {
+  $("#roundLabel").textContent = `${roundNo}라운드`;
   $("#turnCount").textContent = `${history.length}수`;
+
+  const ongoing = lastRequired();
+  $("#ongoingPrompt").textContent = ongoing
+    ? `제시어: ${ongoing}`
+    : promptEl.value.trim()
+      ? `첫 제시어 대기: ${promptEl.value.trim()}`
+      : "아직 게임이 시작되지 않음";
+
   const chain = $("#chain");
   if (!history.length) {
     chain.innerHTML = `<div class="empty">아직 단어가 없음</div>`;
@@ -186,6 +217,7 @@ function renderAnalysis() {
   $("#required").textContent = result.required ? `필요 음절 ${result.required}` : "첫 수 자유";
   $("#assumption").textContent = result.assumption;
   const best = result.candidates[0];
+
   $("#summary").innerHTML = `
     <div class="metric"><span>현재 상태</span><strong class="state-${result.positionStatic ?? "route"}">${(result.positionStatic ?? "start").toUpperCase()}</strong></div>
     <div class="metric"><span>탐색 노드</span><strong>${result.nodes.toLocaleString()}</strong></div>
@@ -194,7 +226,7 @@ function renderAnalysis() {
 
   const body = $("#candidateBody");
   if (!result.candidates.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-row">이어갈 수 있는 단어가 없음</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" class="empty-row">이어갈 수 있는 단어가 없음</td></tr>`;
   } else {
     body.innerHTML = result.candidates
       .map((c, i) => `
@@ -204,6 +236,7 @@ function renderAnalysis() {
           <td><span class="badge ${c.status}">${statusLabel(c.status)}</span></td>
           <td class="eval ${c.score >= 0 ? "positive" : "negative"}">${formatEval(c.score, c.forced)}</td>
           <td>${c.replies.toLocaleString()}</td>
+          <td>${c.opponentAttacks.toLocaleString()}</td>
           <td><div class="bar"><i style="width:${c.neutrality}%"></i><span>${c.neutrality}</span></div></td>
           <td><div class="bar"><i style="width:${c.safety}%"></i><span>${c.safety}</span></div></td>
         </tr>`)
@@ -232,7 +265,7 @@ async function init(forceRefresh = false) {
   try {
     stats = await invoke<EngineStats>("initialize_engine", { request: { forceRefresh } });
     renderStats();
-    $("#notice").textContent = "엔진 준비 완료. 분석은 상대가 가능한 모든 단어 중 최선의 응수를 한다고 가정합니다.";
+    $("#notice").textContent = "엔진 준비 완료. 새게임에서 첫 제시어를 넣고 라운드를 시작하세요.";
   } catch (error) {
     $("#engineStatus").innerHTML = `<span class="dot bad"></span> 로딩 실패`;
     toast(String(error), "error");
@@ -241,13 +274,26 @@ async function init(forceRefresh = false) {
   }
 }
 
+function openingPrompt(): string | null {
+  if (history.length) return null;
+  const value = promptEl.value.trim();
+  return value || null;
+}
+
 async function analyze(overrideMode?: Mode) {
   if (!stats) return toast("먼저 사전을 불러와야 함", "error");
-  setBusy(true, "깊게 계산 중");
+  if (!history.length) {
+    const prompt = openingPrompt();
+    if (!prompt) return toast("첫 제시어를 한 글자로 입력해 주세요", "error");
+    if (Array.from(prompt).length !== 1) return toast("첫 제시어는 한 글자만 입력", "error");
+  }
+
+  setBusy(true, history.length ? "현재 제시어 분석 중" : "첫 수 중립 분석 중");
   try {
     result = await invoke<AnalysisResult>("analyze_chain", {
       request: {
         history,
+        startChar: openingPrompt(),
         mode: overrideMode ?? (modeEl.value as Mode),
         depth: Number(depthEl.value),
         beamWidth: Number(beamEl.value),
@@ -263,6 +309,26 @@ async function analyze(overrideMode?: Mode) {
   }
 }
 
+async function startRound() {
+  if (history.length) return toast("이미 라운드가 진행 중임. 새게임을 눌러 주세요.", "error");
+  const prompt = promptEl.value.trim();
+  if (Array.from(prompt).length !== 1) return toast("제시어를 한 글자로 입력해 주세요", "error");
+
+  // backend가 첫 수일 때 선택 모드와 무관하게 Neutral을 강제한다.
+  await analyze(modeEl.value as Mode);
+  if (!result?.bestWord) {
+    return toast(`제시어 '${prompt}'로 시작할 안전한 단어를 찾지 못함`, "error");
+  }
+
+  const first = result.bestWord;
+  history.push(first);
+  renderHistory();
+  toast(`${roundNo}라운드 시작 · 제시어 ${prompt} → ${first}`);
+
+  // 이제부터는 사용자가 선택한 Hard/Safe/Attack 등의 모드로 분석.
+  await analyze();
+}
+
 async function addTypedWord() {
   const word = inputEl.value.trim();
   if (!word) return;
@@ -272,34 +338,56 @@ async function addTypedWord() {
   await analyze();
 }
 
+function resetAnalysisView() {
+  result = null;
+  $("#candidateBody").innerHTML = `<tr><td colspan="8" class="empty-row">분석 결과가 여기에 표시됨</td></tr>`;
+  $("#pv").innerHTML = `<div class="empty">아직 PV 없음</div>`;
+  $("#required").textContent = "필요 음절 —";
+  $("#summary").innerHTML = `
+    <div class="metric"><span>상태</span><strong>—</strong></div>
+    <div class="metric"><span>탐색 노드</span><strong>—</strong></div>
+    <div class="metric"><span>시간</span><strong>—</strong></div>
+    <div class="metric"><span>Best</span><strong>—</strong></div>`;
+}
+
+function newGame() {
+  history = [];
+  roundNo = 1;
+  promptEl.value = "";
+  inputEl.value = "";
+  resetAnalysisView();
+  renderHistory();
+  promptEl.focus();
+  toast("새게임 준비 완료 · 첫 제시어를 입력하세요");
+}
+
+$("#startRound").addEventListener("click", () => void startRound());
+promptEl.addEventListener("input", renderHistory);
+promptEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !busy) void startRound();
+});
+
 $("#addWord").addEventListener("click", addTypedWord);
 inputEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !busy) void addTypedWord();
 });
+
 $("#analyze").addEventListener("click", () => void analyze());
-$("#firstWord").addEventListener("click", async () => {
-  if (history.length) return toast("첫단어 시작은 기록이 비어 있을 때만 가능", "error");
-  await analyze("neutral");
-  if (result?.bestWord) {
-    history.push(result.bestWord);
-    renderHistory();
-    toast(`중립 첫 수: ${result.bestWord}`);
-    await analyze();
-  }
-});
+$("#newGame").addEventListener("click", newGame);
+
 $("#undo").addEventListener("click", async () => {
   history.pop();
   renderHistory();
-  await analyze();
+  if (history.length) await analyze();
+  else resetAnalysisView();
 });
-$("#clear").addEventListener("click", async () => {
+
+$("#clear").addEventListener("click", () => {
   history = [];
-  result = null;
+  resetAnalysisView();
   renderHistory();
-  $("#candidateBody").innerHTML = `<tr><td colspan="7" class="empty-row">분석 결과가 여기에 표시됨</td></tr>`;
-  $("#pv").innerHTML = `<div class="empty">아직 PV 없음</div>`;
-  $("#required").textContent = "필요 음절 —";
 });
+
 $("#refreshDb").addEventListener("click", () => void init(true));
 
 depthEl.addEventListener("input", () => ($("#depthValue").textContent = depthEl.value));
@@ -315,7 +403,9 @@ const htmlEscapes: Record<string, string> = {
 function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, (ch) => htmlEscapes[ch]);
 }
-function escapeAttr(value: string) { return escapeHtml(value); }
+function escapeAttr(value: string) {
+  return escapeHtml(value);
+}
 
 renderHistory();
 void init(false);
