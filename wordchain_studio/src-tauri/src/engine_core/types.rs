@@ -31,9 +31,16 @@ impl PlayMode {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct SearchConfig { pub depth: u8, pub beam_width: usize }
+pub struct SearchConfig {
+    pub depth: u8,
+    pub beam_width: usize,
+    pub time_limit_ms: u64,
+    pub node_limit: u64,
+}
 impl Default for SearchConfig {
-    fn default() -> Self { Self { depth: 7, beam_width: 28 } }
+    fn default() -> Self {
+        Self { depth: 7, beam_width: 28, time_limit_ms: 2_000, node_limit: 450_000 }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +51,7 @@ pub struct CandidateAnalysis {
     pub status: &'static str,
     pub score: i32,
     pub replies: usize,
+    pub opponent_attacks: usize,
     pub neutrality: u8,
     pub safety: u8,
     pub forced: bool,
