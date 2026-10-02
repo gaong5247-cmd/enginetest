@@ -69,8 +69,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
       - name: Install Android SDK / NDK
         shell: bash
         run: |
