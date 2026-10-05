@@ -35,13 +35,6 @@ impl Ctx{
             true
         }else{false}
     }
- #[test]
- fn excludes_previous_round_words(){
-     let e=Engine::from_text("가나\n가다\n나다\n다라\n라가\n나가\n다가\n가라\n라마\n마가\n").unwrap();
-     let excluded=vec!["가나".to_string()];
-     let r=e.analyze_with_required(&[],&excluded,Some('가'),PlayMode::Neutral,SearchConfig{depth:2,beam_width:8,time_limit_ms:100,node_limit:10_000},10).unwrap();
-     assert!(r.candidates.iter().all(|c|c.word!="가나"));
- }
 }
 
 impl Engine {
@@ -346,5 +339,12 @@ mod tests{
      let e=Engine::from_text("가나\n가다\n나다\n다라\n라가\n나가\n다가\n라마\n마가\n가라\n").unwrap();
      let r=e.analyze_with_required(&[],&[],Some('가'),PlayMode::Neutral,SearchConfig{depth:2,beam_width:8,time_limit_ms:100,node_limit:10_000},10).unwrap();
      assert!(r.candidates.iter().all(|c|c.word.starts_with('가')));
+ }
+ #[test]
+ fn excludes_previous_round_words(){
+     let e=Engine::from_text("가나\n가다\n나다\n다라\n라가\n나가\n다가\n가라\n라마\n마가\n").unwrap();
+     let excluded=vec!["가나".to_string()];
+     let r=e.analyze_with_required(&[],&excluded,Some('가'),PlayMode::Neutral,SearchConfig{depth:2,beam_width:8,time_limit_ms:100,node_limit:10_000},10).unwrap();
+     assert!(r.candidates.iter().all(|c|c.word!="가나"));
  }
 }
