@@ -5,6 +5,7 @@ import type { AnalysisResult, Candidate, EngineStats, Mode } from "./types";
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 let history: string[] = [];
+let previousRoundWords = new Set<string>();
 let stats: EngineStats | null = null;
 let result: AnalysisResult | null = null;
 let busy = false;
@@ -16,13 +17,13 @@ app.innerHTML = `
       <div>
         <div class="eyebrow">ROBLOX KOREAN WORD-CHAIN ENGINE</div>
         <h1>WordChain Studio</h1>
-        <p class="subtitle">전체 사전을 아는 상대를 가정하는 worst-case 분석기</p>
+        <p class="subtitle">라운드 누적 금지 + worst-case 최적 루트 분석</p>
       </div>
       <div class="engine-pill" id="engineStatus"><span class="dot"></span> 엔진 준비 중</div>
     </header>
 
     <section class="notice" id="notice">
-      사전을 불러오는 중입니다. Android에서는 분석을 CPU 작업으로 분리해 화면 멈춤을 방지합니다.
+      사전을 불러오는 중입니다. Android 분석은 CPU 작업으로 분리되어 UI가 멈추지 않게 동작합니다.
     </section>
 
     <section class="controls card">
@@ -63,12 +64,17 @@ app.innerHTML = `
             <input id="promptInput" maxlength="1" autocomplete="off" spellcheck="false" placeholder="예: 술" />
             <button class="primary" id="startRound">1라운드 시작!</button>
           </div>
-          <p>첫 수는 Hard / Safe / Attack 등 어떤 모드여도 무조건 안전한 중립 수를 먼저 고릅니다.</p>
+          <p>매 라운드 첫 수는 선택한 모드와 관계없이 상대가 많이 이을 수 있으면서 공격 루트를 주지 않는 중립 수를 우선합니다.</p>
         </div>
 
         <div class="assumption-box">
           <strong>진행중 제시어</strong>
           <p id="ongoingPrompt">아직 게임이 시작되지 않음</p>
+        </div>
+
+        <div class="assumption-box">
+          <strong>누적 사용 단어</strong>
+          <p id="usedInfo">이전 라운드 0개 · 현재 라운드 0개</p>
         </div>
 
         <div class="chain" id="chain">
@@ -82,11 +88,15 @@ app.innerHTML = `
 
         <div class="button-row">
           <button class="secondary" id="analyze">현재 상태 분석</button>
+          <button class="primary" id="fastAnalyze">⚡ 0.1초 분석</button>
+        </div>
+        <div class="button-row">
+          <button class="secondary" id="nextRound">다음 라운드로 가기</button>
           <button class="ghost" id="newGame">새게임</button>
         </div>
         <div class="button-row small-buttons">
           <button class="ghost" id="undo">한 수 취소</button>
-          <button class="ghost danger" id="clear">기록만 초기화</button>
+          <button class="ghost danger" id="clear">현재 라운드 기록 지우기</button>
         </div>
 
         <div class="assumption-box">
@@ -109,6 +119,7 @@ app.innerHTML = `
           <div class="metric"><span>탐색 노드</span><strong>—</strong></div>
           <div class="metric"><span>시간</span><strong>—</strong></div>
           <div class="metric"><span>Best</span><strong>—</strong></div>
+          <div class="metric"><span>다음 단어</span><strong>—</strong></div>
         </div>
 
         <div class="table-wrap">
@@ -137,7 +148,7 @@ app.innerHTML = `
           <div><span>Nodes</span><strong>—</strong></div>
           <div><span>Edges</span><strong>—</strong></div>
         </div>
-        <p class="micro">분석은 시간/노드 예산을 사용해 CPU가 한 상태에서 무한히 파고들지 않도록 제한됩니다.</p>
+        <p class="micro">0.1초 분석은 별도 100ms 탐색 예산을 사용하며, 일반 분석은 더 깊은 최적 루트를 계산합니다.</p>
       </aside>
     </main>
   </div>
@@ -184,18 +195,20 @@ function lastRequired(): string | null {
 
 function renderHistory() {
   $("#roundLabel").textContent = `${roundNo}라운드`;
+  $("#startRound").textContent = `${roundNo}라운드 시작!`;
   $("#turnCount").textContent = `${history.length}수`;
+  $("#usedInfo").textContent = `이전 라운드 ${previousRoundWords.size.toLocaleString()}개 · 현재 라운드 ${history.length.toLocaleString()}개 · 총 ${(previousRoundWords.size + history.length).toLocaleString()}개`;
 
   const ongoing = lastRequired();
   $("#ongoingPrompt").textContent = ongoing
     ? `제시어: ${ongoing}`
     : promptEl.value.trim()
       ? `첫 제시어 대기: ${promptEl.value.trim()}`
-      : "아직 게임이 시작되지 않음";
+      : `${roundNo}라운드 첫 제시어 입력 대기`;
 
   const chain = $("#chain");
   if (!history.length) {
-    chain.innerHTML = `<div class="empty">아직 단어가 없음</div>`;
+    chain.innerHTML = `<div class="empty">${roundNo}라운드에서 아직 사용한 단어가 없음</div>`;
     return;
   }
   chain.innerHTML = history
@@ -217,12 +230,14 @@ function renderAnalysis() {
   $("#required").textContent = result.required ? `필요 음절 ${result.required}` : "첫 수 자유";
   $("#assumption").textContent = result.assumption;
   const best = result.candidates[0];
+  const nextWord = result.pv.length > 1 ? result.pv[1] : "—";
 
   $("#summary").innerHTML = `
     <div class="metric"><span>현재 상태</span><strong class="state-${result.positionStatic ?? "route"}">${(result.positionStatic ?? "start").toUpperCase()}</strong></div>
     <div class="metric"><span>탐색 노드</span><strong>${result.nodes.toLocaleString()}</strong></div>
     <div class="metric"><span>시간</span><strong>${result.elapsedMs} ms</strong></div>
-    <div class="metric"><span>Best</span><strong>${best ? escapeHtml(best.word) : "없음"}</strong></div>`;
+    <div class="metric"><span>Best</span><strong>${best ? escapeHtml(best.word) : "없음"}</strong></div>
+    <div class="metric"><span>다음 단어</span><strong>${escapeHtml(nextWord)}</strong></div>`;
 
   const body = $("#candidateBody");
   if (!result.candidates.length) {
@@ -251,6 +266,9 @@ function renderAnalysis() {
   document.querySelectorAll<HTMLButtonElement>(".word-button").forEach((button) => {
     button.addEventListener("click", async () => {
       const word = button.dataset.word!;
+      if (previousRoundWords.has(word) || history.includes(word)) {
+        return toast("이미 이번 게임에서 사용한 단어임", "error");
+      }
       history.push(word);
       renderHistory();
       await analyze();
@@ -265,7 +283,7 @@ async function init(forceRefresh = false) {
   try {
     stats = await invoke<EngineStats>("initialize_engine", { request: { forceRefresh } });
     renderStats();
-    $("#notice").textContent = "엔진 준비 완료. 새게임에서 첫 제시어를 넣고 라운드를 시작하세요.";
+    $("#notice").textContent = "엔진 준비 완료. 다음 라운드로 넘어가도 이전 라운드의 단어는 자동으로 금지됩니다.";
   } catch (error) {
     $("#engineStatus").innerHTML = `<span class="dot bad"></span> 로딩 실패`;
     toast(String(error), "error");
@@ -280,7 +298,7 @@ function openingPrompt(): string | null {
   return value || null;
 }
 
-async function analyze(overrideMode?: Mode) {
+async function analyze(overrideMode?: Mode, fast = false) {
   if (!stats) return toast("먼저 사전을 불러와야 함", "error");
   if (!history.length) {
     const prompt = openingPrompt();
@@ -288,16 +306,18 @@ async function analyze(overrideMode?: Mode) {
     if (Array.from(prompt).length !== 1) return toast("첫 제시어는 한 글자만 입력", "error");
   }
 
-  setBusy(true, history.length ? "현재 제시어 분석 중" : "첫 수 중립 분석 중");
+  setBusy(true, fast ? "⚡ 0.1초 분석 중" : history.length ? "현재 제시어 분석 중" : "첫 수 중립 분석 중");
   try {
     result = await invoke<AnalysisResult>("analyze_chain", {
       request: {
         history,
+        excludedWords: Array.from(previousRoundWords),
         startChar: openingPrompt(),
+        fast,
         mode: overrideMode ?? (modeEl.value as Mode),
         depth: Number(depthEl.value),
         beamWidth: Number(beamEl.value),
-        maxCandidates: 24,
+        maxCandidates: fast ? 8 : 24,
       },
     });
     renderAnalysis();
@@ -310,28 +330,27 @@ async function analyze(overrideMode?: Mode) {
 }
 
 async function startRound() {
-  if (history.length) return toast("이미 라운드가 진행 중임. 새게임을 눌러 주세요.", "error");
+  if (history.length) return toast("현재 라운드가 이미 진행 중임", "error");
   const prompt = promptEl.value.trim();
   if (Array.from(prompt).length !== 1) return toast("제시어를 한 글자로 입력해 주세요", "error");
 
-  // backend가 첫 수일 때 선택 모드와 무관하게 Neutral을 강제한다.
   await analyze(modeEl.value as Mode);
   if (!result?.bestWord) {
-    return toast(`제시어 '${prompt}'로 시작할 안전한 단어를 찾지 못함`, "error");
+    return toast(`제시어 '${prompt}'로 시작할 안전한 미사용 단어를 찾지 못함`, "error");
   }
 
   const first = result.bestWord;
   history.push(first);
   renderHistory();
   toast(`${roundNo}라운드 시작 · 제시어 ${prompt} → ${first}`);
-
-  // 이제부터는 사용자가 선택한 Hard/Safe/Attack 등의 모드로 분석.
   await analyze();
 }
 
 async function addTypedWord() {
   const word = inputEl.value.trim();
   if (!word) return;
+  if (previousRoundWords.has(word)) return toast("이전 라운드에서 이미 사용한 단어임", "error");
+  if (history.includes(word)) return toast("현재 라운드에서 이미 사용한 단어임", "error");
   history.push(word);
   inputEl.value = "";
   renderHistory();
@@ -347,18 +366,33 @@ function resetAnalysisView() {
     <div class="metric"><span>상태</span><strong>—</strong></div>
     <div class="metric"><span>탐색 노드</span><strong>—</strong></div>
     <div class="metric"><span>시간</span><strong>—</strong></div>
-    <div class="metric"><span>Best</span><strong>—</strong></div>`;
+    <div class="metric"><span>Best</span><strong>—</strong></div>
+    <div class="metric"><span>다음 단어</span><strong>—</strong></div>`;
+}
+
+function nextRound() {
+  if (!history.length) return toast("현재 라운드에서 사용한 단어가 없음", "error");
+  for (const word of history) previousRoundWords.add(word);
+  history = [];
+  roundNo += 1;
+  promptEl.value = "";
+  inputEl.value = "";
+  resetAnalysisView();
+  renderHistory();
+  promptEl.focus();
+  toast(`${roundNo}라운드 준비 · 이전 ${previousRoundWords.size}개 단어 재사용 금지`);
 }
 
 function newGame() {
   history = [];
+  previousRoundWords.clear();
   roundNo = 1;
   promptEl.value = "";
   inputEl.value = "";
   resetAnalysisView();
   renderHistory();
   promptEl.focus();
-  toast("새게임 준비 완료 · 첫 제시어를 입력하세요");
+  toast("완전 새게임 · 모든 사용단어 기록 초기화");
 }
 
 $("#startRound").addEventListener("click", () => void startRound());
@@ -373,6 +407,8 @@ inputEl.addEventListener("keydown", (event) => {
 });
 
 $("#analyze").addEventListener("click", () => void analyze());
+$("#fastAnalyze").addEventListener("click", () => void analyze(undefined, true));
+$("#nextRound").addEventListener("click", nextRound);
 $("#newGame").addEventListener("click", newGame);
 
 $("#undo").addEventListener("click", async () => {
