@@ -35,16 +35,23 @@ impl Ctx{
             true
         }else{false}
     }
+ #[test]
+ fn excludes_previous_round_words(){
+     let e=Engine::from_text("가나\n가다\n나다\n다라\n라가\n나가\n다가\n가라\n라마\n마가\n").unwrap();
+     let excluded=vec!["가나".to_string()];
+     let r=e.analyze_with_required(&[],&excluded,Some('가'),PlayMode::Neutral,SearchConfig{depth:2,beam_width:8,time_limit_ms:100,node_limit:10_000},10).unwrap();
+     assert!(r.candidates.iter().all(|c|c.word!="가나"));
+ }
 }
 
 impl Engine {
  pub fn analyze(&self,history:&[String],mode:PlayMode,cfg:SearchConfig,max:usize)->Result<AnalysisOutput,String>{
-  self.analyze_with_required(history,None,mode,cfg,max)
+  self.analyze_with_required(history,&[],None,mode,cfg,max)
  }
 
- pub fn analyze_with_required(&self,history:&[String],initial_required:Option<char>,mode:PlayMode,cfg:SearchConfig,max:usize)->Result<AnalysisOutput,String>{
+ pub fn analyze_with_required(&self,history:&[String],excluded:&[String],initial_required:Option<char>,mode:PlayMode,cfg:SearchConfig,max:usize)->Result<AnalysisOutput,String>{
   let started=Instant::now();
-  let (used,history_required,mut warnings)=self.prepare(history)?;
+  let (used,history_required,mut warnings)=self.prepare(history,excluded)?;
   let required=if history.is_empty(){initial_required.or(history_required)}else{history_required};
   let pos=required.map(|c|self.static_type(c));
   let mut ctx=Ctx::new(used,cfg);
@@ -122,15 +129,22 @@ impl Engine {
   })
  }
 
- fn prepare(&self,h:&[String])->Result<(HashSet<usize>,Option<char>,Vec<String>),String>{
+ fn prepare(&self,h:&[String],excluded:&[String])->Result<(HashSet<usize>,Option<char>,Vec<String>),String>{
   let mut used=HashSet::new();
+  for raw in excluded {
+      let w=raw.trim();
+      if let Some(&i)=self.index_by_text.get(w){used.insert(i);}
+  }
   let mut seen=HashSet::new();
   let mut req=None;
   let mut warn=vec![];
   for (turn,raw) in h.iter().enumerate(){
       let w=raw.trim();
       if w.chars().count()<2{return Err(format!("{}번째 단어가 너무 짧습니다: {}",turn+1,w))}
-      if !seen.insert(w.to_string()){return Err(format!("중복 단어입니다: {w}"))}
+      if !seen.insert(w.to_string()){return Err(format!("현재 라운드 중복 단어입니다: {w}"))}
+      if let Some(&i)=self.index_by_text.get(w){
+          if used.contains(&i){return Err(format!("이전 라운드에서 이미 사용한 단어입니다: {w}"))}
+      }
       let head=w.chars().next().unwrap();
       if let Some(r)=req{
           if !roblox_variants(r).contains(&head){
@@ -330,7 +344,7 @@ mod tests{
  #[test]
  fn initial_required_filters_first_move(){
      let e=Engine::from_text("가나\n가다\n나다\n다라\n라가\n나가\n다가\n라마\n마가\n가라\n").unwrap();
-     let r=e.analyze_with_required(&[],Some('가'),PlayMode::Neutral,SearchConfig{depth:2,beam_width:8,time_limit_ms:100,node_limit:10_000},10).unwrap();
+     let r=e.analyze_with_required(&[],&[],Some('가'),PlayMode::Neutral,SearchConfig{depth:2,beam_width:8,time_limit_ms:100,node_limit:10_000},10).unwrap();
      assert!(r.candidates.iter().all(|c|c.word.starts_with('가')));
  }
 }
