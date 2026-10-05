@@ -35,7 +35,9 @@ struct InitRequest {
 #[serde(rename_all = "camelCase")]
 struct AnalysisRequest {
     history: Vec<String>,
+    excluded_words: Option<Vec<String>>,
     start_char: Option<String>,
+    fast: Option<bool>,
     mode: Option<String>,
     depth: Option<u8>,
     beam_width: Option<usize>,
@@ -187,25 +189,36 @@ async fn analyze_chain(
         selected_mode
     };
 
-    // 모바일은 짧은 예산으로 UI 먹통을 막고, 데스크톱은 더 깊게 허용.
     let mobile = cfg!(mobile);
-    let depth_cap = if mobile { 6 } else { 10 };
-    let beam_cap = if mobile { 24 } else { 48 };
-    let config = SearchConfig {
-        depth: request.depth.unwrap_or(if mobile { 5 } else { 7 }).clamp(1, depth_cap),
-        beam_width: request
-            .beam_width
-            .unwrap_or(if mobile { 16 } else { 28 })
-            .clamp(4, beam_cap),
-        time_limit_ms: if mobile { 1_200 } else { 2_800 },
-        node_limit: if mobile { 140_000 } else { 650_000 },
+    let fast = request.fast.unwrap_or(false);
+    let config = if fast {
+        SearchConfig {
+            depth: 3,
+            beam_width: if mobile { 8 } else { 10 },
+            time_limit_ms: 100,
+            node_limit: if mobile { 8_000 } else { 15_000 },
+        }
+    } else {
+        let depth_cap = if mobile { 6 } else { 10 };
+        let beam_cap = if mobile { 24 } else { 48 };
+        SearchConfig {
+            depth: request.depth.unwrap_or(if mobile { 5 } else { 7 }).clamp(1, depth_cap),
+            beam_width: request
+                .beam_width
+                .unwrap_or(if mobile { 16 } else { 28 })
+                .clamp(4, beam_cap),
+            time_limit_ms: if mobile { 1_200 } else { 2_800 },
+            node_limit: if mobile { 140_000 } else { 650_000 },
+        }
     };
     let history = request.history;
-    let max_candidates = request.max_candidates.unwrap_or(20).clamp(1, 40);
+    let excluded_words = request.excluded_words.unwrap_or_default();
+    let max_candidates = request.max_candidates.unwrap_or(if fast { 8 } else { 20 }).clamp(1, 40);
 
     let output = tauri::async_runtime::spawn_blocking(move || {
         engine.analyze_with_required(
             &history,
+            &excluded_words,
             initial_required,
             effective_mode,
             config,
@@ -247,7 +260,7 @@ fn to_dto(output: AnalysisOutput) -> AnalysisDto {
         nodes: output.nodes,
         elapsed_ms: output.elapsed_ms,
         warnings: output.warnings,
-        assumption: "첫 수는 모드와 무관하게 중립 수를 선택합니다. 이후에는 상대가 DB의 모든 합법 단어를 알고 자신에게 가장 유리한 응수를 고른다고 가정합니다.".to_string(),
+        assumption: "각 라운드 첫 수는 모드와 무관하게 중립 수를 선택합니다. 이전 라운드 사용 단어는 재사용하지 않으며, 이후에는 상대가 DB의 모든 합법 단어를 알고 자신에게 가장 유리한 응수를 고른다고 가정합니다.".to_string(),
     }
 }
 
